@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Just The Recipe</title>
+  <style>
+    :root {
+      --bg: #f6f6f4;
+      --card: #ffffff;
+      --ink: #1a1a1a;
+      --ink-2: #555555;
+      --line: #e2e2df;
+      --accent: #e85913;
+      --accent-soft: #fff0e8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+      padding: 1rem;
+    }
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.85rem;
+      line-height: 1.2;
+    }
+    .subtitle {
+      margin: 0.35rem 0 0;
+      color: var(--ink-2);
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      border: 1px solid var(--line);
+      border-radius: 0.75rem;
+      padding: 0.75rem;
+      font: inherit;
+      color: inherit;
+      background: var(--card);
+      resize: vertical;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1.25rem;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.05); }
+    .output { display: none; }
+    .output.visible { display: block; }
+    .recipe-card h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1.35rem;
+    }
+    .recipe-card h3 {
+      margin: 1rem 0 0.5rem;
+      font-size: 1rem;
+      color: var(--ink-2);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .recipe-card ul,
+    .recipe-card ol {
+      margin: 0 0 0.75rem 1.25rem;
+      padding: 0;
+    }
+    .recipe-card li { margin-bottom: 0.35rem; }
+    .error {
+      margin-top: 0.75rem;
+      color: #b00020;
+    }
+    footer {
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--ink-2);
+      margin-top: 2rem;
+    }
+    footer a { color: var(--ink-2); }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Just The Recipe</h1>
+      <p class="subtitle">Paste a recipe page and get only the ingredients and steps.</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <form id="recipeForm" onsubmit="return false;">
+          <label for="paste">Paste recipe page HTML or text</label>
+          <textarea id="paste" placeholder="Paste the full page source or the recipe text here…"></textarea>
+          <div class="actions">
+            <button type="submit">Get the recipe</button>
+          </div>
+          <div id="error" class="error" role="alert"></div>
+        </form>
+      </section>
+
+      <section id="result" class="card output">
+        <div class="recipe-card">
+          <h2 id="recipeTitle"></h2>
+          <h3>Ingredients</h3>
+          <ul id="ingredients"></ul>
+          <h3>Steps</h3>
+          <ol id="steps"></ol>
+          <div class="actions">
+            <button type="button" id="copyBtn">Copy recipe</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>Wished by T1LT3D3412, granted by Genie (open source) · report a bug → https://github.com/rmotgi1227/just-the-recipe-paste/issues</footer>
+  </div>
+
+  <script>
+  (function () {
+    const form = document.getElementById('recipeForm');
+    const paste = document.getElementById('paste');
+    const result = document.getElementById('result');
+    const titleEl = document.getElementById('recipeTitle');
+    const ingEl = document.getElementById('ingredients');
+    const stepsEl = document.getElementById('steps');
+    const copyBtn = document.getElementById('copyBtn');
+    const errorEl = document.getElementById('error');
+
+    function clearResult() {
+      result.classList.remove('visible');
+      titleEl.textContent = '';
+      ingEl.innerHTML = '';
+      stepsEl.innerHTML = '';
+      errorEl.textContent = '';
+    }
+
+    function findRecipe(obj) {
+      if (!obj || typeof obj !== 'object') return null;
+      if (Array.isArray(obj)) {
+        for (const item of obj) {
+          const r = findRecipe(item);
+          if (r) return r;
+        }
+        return null;
+      }
+      const types = [].concat(obj['@type'] || []);
+      if (types.includes('Recipe')) return obj;
+      if (obj['@graph']) return findRecipe(obj['@graph']);
+      for (const key of Object.keys(obj)) {
+        if (key === '@context') continue;
+        const r = findRecipe(obj[key]);
+        if (r) return r;
+      }
+      return null;
+    }
+
+    function fromJSONLD(recipe) {
+      const name = recipe.name || 'Recipe';
+      const ingredients = [].concat(recipe.recipeIngredient || []).filter(Boolean);
+      const instructions = [];
+      const rawSteps = recipe.recipeInstructions || [];
+      for (const step of (Array.isArray(rawSteps) ? rawSteps : [rawSteps])) {
+        if (typeof step === 'string') instructions.push(step);
+        else if (step && typeof step.text === 'string') instructions.push(step.text);
+      }
+      return { name, ingredients, instructions };
+    }
+
+    function sectionValues(doc, headingTest) {
+      const values = [];
+      const headings = Array.from(doc.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+      for (const h of headings) {
+        if (!headingTest(h.textContent)) continue;
+        let el = h.nextElementSibling;
+        while (el && !/^H[1-6]$/i.test(el.tagName)) {
+          const lis = el.tagName === 'LI' ? [el] : Array.from(el.querySelectorAll('li'));
+          for (const li of lis) {
+            const text = li.textContent.trim();
+            if (text) values.push(text);
+          }
+          el = el.nextElementSibling;
+        }
+      }
+      return values;
+    }
+
+    function fromHTML(doc) {
+      const h1 = doc.querySelector('h1');
+      const title = h1 ? h1.textContent.trim() : '';
+      let ingredients = sectionValues(doc, function (t) { return /ingredient|what you need/i.test(t); });
+      let instructions = sectionValues(doc, function (t) { return /instruction|direction|step|method|preparation|how to make/i.test(t); });
+
+      if (!ingredients.length && !instructions.length) {
+        const allLis = Array.from(doc.querySelectorAll('li')).map(function (li) { return li.textContent.trim(); }).filter(Boolean);
+        const mid = Math.ceil(allLis.length / 2);
+        ingredients = allLis.slice(0, mid);
+        instructions = allLis.slice(mid);
+      }
+
+      return { name: title || 'Recipe', ingredients, instructions };
+    }
+
+    function findHeading(lines, re) {
+      for (let i = 0; i < lines.length; i++) {
+        if (re.test(lines[i])) return i;
+      }
+      return -1;
+    }
+
+    function isHeading(line) {
+      return /^(ingredient|ingredients|instructions|directions|steps|method|preparation|notes|tips|nutrition|serves|yield)/i.test(line);
+    }
+
+    function cleanLine(line) {
+      return line.replace(/^[-–—*•]\s*/, '').replace(/^\d+[\.)]\s*/, '');
+    }
+
+    function fromText(text) {
+      const lines = text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+      const ingIdx = findHeading(lines, /ingredient|what you need/i);
+      const stepIdx = findHeading(lines, /instruction|direction|step|method|preparation|how to make/i);
+      const ingredients = [];
+      const instructions = [];
+
+      if (ingIdx !== -1 && stepIdx !== -1) {
+        for (let i = ingIdx + 1; i < stepIdx; i++) {
+          if (isHeading(lines[i])) break;
+          ingredients.push(cleanLine(lines[i]));
+        }
+        for (let i = stepIdx + 1; i < lines.length; i++) {
+          if (isHeading(lines[i])) break;
+          instructions.push(cleanLine(lines[i]));
+        }
+      } else if (ingIdx !== -1) {
+        for (let i = ingIdx + 1; i < lines.length; i++) {
+          if (isHeading(lines[i])) break;
+          ingredients.push(cleanLine(lines[i]));
+        }
+      } else if (stepIdx !== -1) {
+        for (let i = stepIdx + 1; i < lines.length; i++) {
+          if (isHeading(lines[i])) break;
+          instructions.push(cleanLine(lines[i]));
+        }
+      } else {
+        const mid = Math.ceil(lines.length / 2);
+        lines.slice(0, mid).forEach(function (l) { ingredients.push(cleanLine(l)); });
+        lines.slice(mid).forEach(function (l) { instructions.push(cleanLine(l)); });
+      }
+
+      return { name: 'Recipe', ingredients: ingredients.filter(Boolean), instructions: instructions.filter(Boolean) };
+    }
+
+    function normalizeRecipe(raw) {
+      const text = raw.trim();
+      if (!text) return null;
+
+      const looksLikeHTML = text.includes('<') && text.includes('>');
+      if (looksLikeHTML) {
+        const doc = new DOMParser().parseFromString(text, 'text/html');
+        const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+        for (const s of scripts) {
+          try {
+            const data = JSON.parse(s.textContent);
+            const recipe = findRecipe(data);
+            if (recipe) return fromJSONLD(recipe);
+          } catch (e) {}
+        }
+        return fromHTML(doc);
+      }
+
+      return fromText(text);
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      clearResult();
+
+      const raw = paste.value;
+      if (!raw.trim()) {
+        errorEl.textContent = 'Paste something first.';
+        return;
+      }
+
+      const recipe = normalizeRecipe(raw);
+      if (!recipe || (!recipe.ingredients.length && !recipe.instructions.length)) {
+        errorEl.textContent = 'Couldn\'t find a recipe. Try pasting the full page HTML.';
+        return;
+      }
+
+      titleEl.textContent = recipe.name;
+      recipe.ingredients.forEach(function (item) {
+        const li = document.createElement('li');
+        li.textContent = item;
+        ingEl.appendChild(li);
+      });
+      recipe.instructions.forEach(function (item) {
+        const li = document.createElement('li');
+        li.textContent = item;
+        stepsEl.appendChild(li);
+      });
+      result.classList.add('visible');
+    });
+
+    copyBtn.addEventListener('click', function () {
+      const lines = [titleEl.textContent, '', 'Ingredients:'];
+      ingEl.querySelectorAll('li').forEach(function (li) { lines.push('• ' + li.textContent); });
+      lines.push('', 'Steps:');
+      stepsEl.querySelectorAll('li').forEach(function (li, i) { lines.push((i + 1) + '. ' + li.textContent); });
+      const text = lines.join('\n');
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+          const original = copyBtn.textContent;
+          copyBtn.textContent = 'Copied!';
+          setTimeout(function () { copyBtn.textContent = original; }, 1500);
+        }).catch(function () {
+          errorEl.textContent = 'Copy failed. Please copy manually.';
+        });
+      } else {
+        errorEl.textContent = 'Copy not supported in this browser.';
+      }
+    });
+  })();
+
+
+  </script>
+</body>
+</html>
